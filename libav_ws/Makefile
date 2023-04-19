@@ -1,7 +1,7 @@
 PROG ?= mongoosemania                   # Program we are building
 DELETE = rm -rf                   # Command to remove files
 OUT ?= -o $(PROG)                  # Compiler argument for output file
-SOURCES = main.c mongoose.c logging.c    # Source code files, Tiger added logging.c
+SOURCES = main.c mongoose.c logging.c streamframes.c    # Source code files, Tiger added logging.c, streamframes.c
 CFLAGS = -W -Wall -Wextra -g -I.  # Build options
 
 # Mongoose build options. See https://mongoose.ws/documentation/#build-options
