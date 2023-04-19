@@ -1,5 +1,7 @@
 # Mongoose - Embedded Web Server / Embedded Networking Library
 
+This repo contains additinal files (in libav_ws) while I experiment with Mongoose as a libav media broadcasting tool.
+
 [![License: GPLv2/Commercial](https://img.shields.io/badge/License-GPLv2%20or%20Commercial-green.svg)](https://opensource.org/licenses/gpl-2.0.php)
 [![Build Status]( https://github.com/cesanta/mongoose/workflows/build/badge.svg)](https://github.com/cesanta/mongoose/actions)
 [![Code Coverage](https://codecov.io/gh/cesanta/mongoose/branch/master/graph/badge.svg)](https://codecov.io/gh/cesanta/mongoose)
