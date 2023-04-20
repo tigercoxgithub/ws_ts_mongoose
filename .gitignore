@@ -1,4 +1,9 @@
-/libav_ws/mongoosemania
+*/mongoosemania
+
+#images
+*.jpg
+*.png
+*.pgm
 
 # Prerequisites
 *.d
