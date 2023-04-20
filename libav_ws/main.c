@@ -8,14 +8,26 @@
 //Tiger added
 #include <libavcodec/avcodec.h> //ffmpeg
 #include <libavformat/avformat.h> //ffmpeg
+
 #include <stdarg.h>  //cmdline args
 #include "logging.h" 
 #include "streamframes.h"
 
 // Define a custom data structure to hold extra arguments
 struct TimerArgs {
-    struct mg_mgr * arg1;
-    char *arg2;
+    struct mg_mgr * mgr;
+    char *initialised;
+    AVFormatContext *pFormatContext;
+    AVPacket *pPacket;
+    int video_stream_index;
+    AVCodecContext *pCodecContext;
+    AVFrame *pFrame; 
+    
+};
+
+struct imageData {
+  unsigned char* imageDataBuffer; // Buffer to hold image data
+  size_t imageDataSize;           // Size of the image data
 };
 
 
@@ -52,18 +64,47 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
   (void) fn_data;
 }
 
+
+
 void timer_fn(void *args) {
+logging("timer_fn called");
 
-struct TimerArgs *tester = args;
-const void *constVoidData = (const void *)tester->arg2;
-    
+struct TimerArgs *timerArgs = args;
+struct imageData imageDataArgs;
+imageDataArgs.imageDataBuffer = NULL; // Initialize the buffer to NULL
+imageDataArgs.imageDataSize = 0;     // Initialize the size to 0
 
-  struct mg_mgr *mgr = (struct mg_mgr *) tester->arg1;
+get_frames(timerArgs->pFormatContext, timerArgs->pPacket, timerArgs->video_stream_index, timerArgs->pCodecContext, timerArgs->pFrame, &imageDataArgs.imageDataBuffer, &imageDataArgs.imageDataSize);
+
+logging("Image size: %d", imageDataArgs.imageDataSize);
+
+// logging("Printing bytes to console");
+//     for (unsigned long i = 0; i < imageDataArgs.imageDataSize; i++) {
+//         printf("%02X ", (unsigned int)&imageDataArgs.imageDataBuffer[i]);
+//     }
+//     printf("\n");
+
+//convert type for the sake of mg_ws_send
+//const void *constVoidData = (const void *)imageDataArgs.imageDataSize;
+
+
+  struct mg_mgr *mgr = (struct mg_mgr *) timerArgs->mgr;
   // Traverse over all connections
   for (struct mg_connection *c = mgr->conns; c != NULL; c = c->next) {
     // Broadcast to everybody
-    mg_ws_send(c, constVoidData, 2, WEBSOCKET_OP_TEXT);
+    //mg_ws_send(c, "hi", 2, WEBSOCKET_OP_TEXT);
+    
+    // Send the buffer as binary data
+    mg_ws_send(c, imageDataArgs.imageDataBuffer, imageDataArgs.imageDataSize, WEBSOCKET_OP_BINARY);
   }
+
+// Free the memory allocated for imageDataBuffer
+if (imageDataArgs.imageDataBuffer != NULL) {
+    free(imageDataArgs.imageDataBuffer);
+    imageDataArgs.imageDataBuffer = NULL; // Set the pointer to NULL to avoid dangling pointer
+}
+
+
 }
 
 int main(int argc, const char *argv[]) {
@@ -79,10 +120,17 @@ int main(int argc, const char *argv[]) {
 
   // Create a custom data structure to hold both streamframe timer_fn arguments
     struct TimerArgs args;
-    args.arg2 = "T";
+    args.initialised = "N";
+    args.pFormatContext = NULL;
+    args.pPacket = NULL;
+    args.video_stream_index = -1;
+    args.pCodecContext = NULL;
+    args.pFrame = NULL;
 
-  if(streamframes(argv[1], &args.arg2) != 0){
-    logging("streamframes(argv[1]) falied.");
+  //initialise video grabbing
+  int initialise_av = streamframes(argv[1], &args.initialised, &args.pFormatContext, &args.pPacket, &args.video_stream_index, &args.pCodecContext, &args.pFrame);
+  if(initialise_av < 0){
+    logging("Initialising streamframes() falied.");
     return -1;
   }
   
@@ -93,8 +141,8 @@ int main(int argc, const char *argv[]) {
   logging("Starting WS listener on %s/websocket\n", s_listen_on);
   mg_log_set(MG_LL_DEBUG);  // Set log level
 
-  args.arg1 = &mgr;
-  mg_timer_add(&mgr, 2000, MG_TIMER_REPEAT, timer_fn, &args);  //add a timer to broadcast latest  frame
+  args.mgr = &mgr;
+  mg_timer_add(&mgr, 3000, MG_TIMER_REPEAT, timer_fn, &args);  //add a timer to broadcast latest  frame
   
 
   mg_http_listen(&mgr, s_listen_on, fn, NULL);  // Create HTTP listener

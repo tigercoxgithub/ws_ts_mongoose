@@ -4,7 +4,13 @@
 #include "logging.h"
 #include <libavcodec/avcodec.h> //ffmpeg
 #include <libavformat/avformat.h> //ffmpeg
+#include <libavutil/pixdesc.h> //ffmpeg pixel format
 
-int streamframes(const char* inputName, char** changable);
+int streamframes(const char* inputName, char** initialised, AVFormatContext **pFormatContext, AVPacket **pPacket, int *video_stream_index, AVCodecContext **pCodecContext, AVFrame **pFrame );
+int get_frames(AVFormatContext *pFormatContext, AVPacket *pPacket, int video_stream_index, AVCodecContext *pCodecContext, AVFrame *pFrame, unsigned char** imageDataBuffer, size_t *imageDataSize);
+int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame, unsigned char** imageDataBuffer, size_t *imageDataSize);
+int save_frame_as_jpeg(AVFrame *pFrame, char* frame_filename,  unsigned char** imageDataBuffer, size_t *imageDataSize);
+
+
 
 #endif /* STREAMFRAMES_H */
