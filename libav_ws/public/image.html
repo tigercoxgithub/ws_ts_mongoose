@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<body>
+  <h1>CONNECT TO DRAW IMAGES  TO CANVAS</h1>
+  <canvas id="video-canvas" width="1280"  height="720"></canvas>
+  <input id="url" type="text" placeholder="Type URL" value="" style="width:20em;" />
+  <button id="connect">connect</button>
+  <div style="height: 0.3em;">&nbsp;</div>
+  <input id="message" type="text" placeholder="Type message" style="width: 20em;" />
+  <button id="send">send message</button>
+  <div style="margin-top: 1em;">Event log:</div>
+  <div id="log" style="background: #eee; height: 10em; padding: 0.5em;"></div>
+</body>
+<script>
+  document.getElementById("url").value = 'wss://'+document.location.hostname+'/websocket';
+  var ws, E = function (id) { return document.getElementById(id); };
+  var url = E('url'), connect = E('connect'), message = E('message'), send = E('send'), log = E('log');
+  var enable = function (en) { message.disabled = send.disabled = !en; url.disabled = en; connect.innerHTML = en ? 'disconnect' : 'connect'; };
+  enable(false)
+  connect.onclick = function () {
+    if (ws) { ws.close(); return; }
+    ws = new WebSocket(url.value);
+    if (!ws) return;
+    ws.onopen = function () { log.innerHTML += 'CONNECTION OPENED<br/>'; }
+
+    var canvas = document.getElementById('video-canvas');
+    var ctx = canvas.getContext('2d');
+    var imageSources = [];
+
+    ws.onmessage = function (ev) {
+      // log.innerHTML += 'RECEIVED: ' + ev.data + '<br/>'; 
+
+      // Create a URL for the Blob object
+      
+      imageSources.push(URL.createObjectURL(new Blob([event.data], { type: "image/jpeg" })));
+      const img = new Image();
+      img.src = imageSources[imageSources.length-1];
+      console.log(imageSources);
+      img.decode().then(() => {
+        // Set the canvas dimensions to match the image dimensions
+        canvas.width = 1280;
+        canvas.height = 720;
+        // Draw the image onto the canvas
+        ctx.drawImage(img, 0, 0);
+
+        if(imageSources.length>2){
+          URL.revokeObjectURL(imageSources[0]); // manually revoke the URL to release its memory
+          imageSources.shift();
+        }
+
+      })
+        .catch((encodingError) => {
+          console.log("Error decoding image");
+        });
+        
+
+
+    }
+
+
+    ws.onerror = function (ev) { log.innerHTML += 'ERROR: ' + ev + '<br/>'; }
+    ws.onclose = function () { log.innerHTML += 'CONNECTION CLOSED<br/>'; enable(false); ws = null; }
+    enable(true);
+  };
+  send.onclick = function () {
+    if (!ws) return;
+    log.innerHTML += 'SENT: ' + message.value + '<br/>';
+    ws.send(message.value);
+  }
+</script>
+
+</html>

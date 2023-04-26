@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<title>JSMpeg Stream Client</title>
+	<style type="text/css">
+		html, body {
+			background-color: #111;
+			text-align: center;
+		}
+	</style>
+	
+</head>
+<body>
+	<canvas id="video-canvas"></canvas>
+	<script type="text/javascript" src="jsmpeg.min.js"></script>
+	<script type="text/javascript">
+		
+		var url = 'wss://'+document.location.hostname+'/websocket';
+    ws = new WebSocket(url);
+
+    // Create an ArrayBuffer to hold the binary data
+var imageBuffer = new ArrayBuffer(0);
+var imageArray = new Uint8Array(imageBuffer);
+
+// WebSocket onmessage event handler
+ws.onmessage = function(event) {
+  // Append the new binary data to the existing ArrayBuffer
+  var newData = new Uint8Array(event.data);
+  var newBuffer = new ArrayBuffer(imageBuffer.byteLength + newData.byteLength);
+  var newArray = new Uint8Array(newBuffer);
+  newArray.set(new Uint8Array(imageBuffer), 0);
+  newArray.set(newData, imageBuffer.byteLength);
+  imageBuffer = newBuffer;
+};
+
+// Decode the JPEG frames using JSMpeg and display them on a canvas
+var canvas = document.getElementById('video-canvas');
+var ctx = canvas.getContext('2d');
+var video = new JSMpeg.Player('dummy.html', {
+  canvas: canvas,
+  autoplay: true,
+  videoBufferSize: imageBuffer.byteLength,
+  onVideoDecode: function(decodedData) {
+    // Draw the decoded image data on the canvas
+    var imageData = ctx.createImageData(decodedData.width, decodedData.height);
+    imageData.data.set(decodedData);
+    ctx.putImageData(imageData, 0, 0);
+  }
+});
+
+	</script>
+</body>
+</html>

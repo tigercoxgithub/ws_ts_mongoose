@@ -1,6 +1,3 @@
-// Copyright (c) 2020 Cesanta Software Limited
-// All rights reserved
-//
 // Example Websocket server. See https://mongoose.ws/tutorials/websocket-server/
 
 #include "mongoose.h"
@@ -18,11 +15,8 @@ struct TimerArgs {
     struct mg_mgr * mgr;
     char *initialised;
     AVFormatContext *pFormatContext;
-    AVPacket *pPacket;
     int video_stream_index;
     AVCodecContext *pCodecContext;
-    AVFrame *pFrame; 
-    
 };
 
 struct imageData {
@@ -32,7 +26,7 @@ struct imageData {
 
 
 static const char *s_listen_on = "ws://localhost:8080";
-static const char *s_web_root = ".";
+static const char *s_web_root = "./public";
 
 // This RESTful server implements the following endpoints:
 //   /websocket - upgrade to Websocket, and implement websocket echo server
@@ -43,6 +37,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     // c->is_hexdumping = 1;
   } else if (ev == MG_EV_HTTP_MSG) {
     struct mg_http_message *hm = (struct mg_http_message *) ev_data;
+    logging("HTTP FROM: %s", hm->uri.ptr);
+
     if (mg_http_match_uri(hm, "/websocket")) {
       // Upgrade to websocket. From now on, a connection is a full-duplex
       // Websocket connection, which will receive MG_EV_WS_MSG events.
@@ -50,11 +46,30 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     } else if (mg_http_match_uri(hm, "/rest")) {
       // Serve REST response
       mg_http_reply(c, 200, "", "{\"result\": %d}\n", 123);
-    } else {
-      // Serve static files
-      struct mg_http_serve_opts opts = {.root_dir = s_web_root};
-      mg_http_serve_dir(c, ev_data, &opts);
-    }
+
+    } else if (mg_http_match_uri(hm, "/*")) {
+      
+      // Create a buffer to store the extra headers
+      char extra_headers[256];
+      // Copy the initial headers to the buffer
+      strcpy(extra_headers, "First Header: first\r\nSecond Header: second\r\n");
+      // Concatenate the value of hm->uri to the buffer
+      strcat(extra_headers, "Url Path: ");
+      strncat(extra_headers, hm->uri.ptr, hm->uri.len);
+      strcat(extra_headers, "\r\n");
+
+      char file_path[256];
+      strcpy(file_path, s_web_root);
+      strncat(file_path, hm->uri.ptr, hm->uri.len);
+
+      struct mg_http_serve_opts opts = {
+        .extra_headers = extra_headers,
+      };
+
+      mg_http_serve_file(c, hm, file_path, &opts);
+      
+    } 
+
   } else if (ev == MG_EV_WS_MSG) {
     // Got websocket frame. Received data is wm->data. Echo it back!
     struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
@@ -74,34 +89,24 @@ struct imageData imageDataArgs;
 imageDataArgs.imageDataBuffer = NULL; // Initialize the buffer to NULL
 imageDataArgs.imageDataSize = 0;     // Initialize the size to 0
 
-get_frames(timerArgs->pFormatContext, timerArgs->pPacket, timerArgs->video_stream_index, timerArgs->pCodecContext, timerArgs->pFrame, &imageDataArgs.imageDataBuffer, &imageDataArgs.imageDataSize);
+get_frames(timerArgs->pFormatContext, timerArgs->video_stream_index, timerArgs->pCodecContext, &imageDataArgs.imageDataBuffer, &imageDataArgs.imageDataSize);
 
-logging("Image size: %d", imageDataArgs.imageDataSize);
+logging("---- DECODED IMAGE SIZE: %d", imageDataArgs.imageDataSize);
 
-// logging("Printing bytes to console");
-//     for (unsigned long i = 0; i < imageDataArgs.imageDataSize; i++) {
-//         printf("%02X ", (unsigned int)&imageDataArgs.imageDataBuffer[i]);
-//     }
-//     printf("\n");
 
-//convert type for the sake of mg_ws_send
-//const void *constVoidData = (const void *)imageDataArgs.imageDataSize;
-
+if(imageDataArgs.imageDataSize>0) {
 
   struct mg_mgr *mgr = (struct mg_mgr *) timerArgs->mgr;
-  // Traverse over all connections
+
+  // Traverse over all connections and broadcast binary data to everybody
   for (struct mg_connection *c = mgr->conns; c != NULL; c = c->next) {
-    // Broadcast to everybody
-    //mg_ws_send(c, "hi", 2, WEBSOCKET_OP_TEXT);
-    
-    // Send the buffer as binary data
     mg_ws_send(c, imageDataArgs.imageDataBuffer, imageDataArgs.imageDataSize, WEBSOCKET_OP_BINARY);
   }
 
-// Free the memory allocated for imageDataBuffer
-if (imageDataArgs.imageDataBuffer != NULL) {
-    free(imageDataArgs.imageDataBuffer);
+    av_free(imageDataArgs.imageDataBuffer);
     imageDataArgs.imageDataBuffer = NULL; // Set the pointer to NULL to avoid dangling pointer
+    imageDataArgs.imageDataSize = 0;
+    
 }
 
 
@@ -122,13 +127,11 @@ int main(int argc, const char *argv[]) {
     struct TimerArgs args;
     args.initialised = "N";
     args.pFormatContext = NULL;
-    args.pPacket = NULL;
     args.video_stream_index = -1;
     args.pCodecContext = NULL;
-    args.pFrame = NULL;
 
   //initialise video grabbing
-  int initialise_av = streamframes(argv[1], &args.initialised, &args.pFormatContext, &args.pPacket, &args.video_stream_index, &args.pCodecContext, &args.pFrame);
+  int initialise_av = streamframes(argv[1], &args.initialised, &args.pFormatContext, &args.video_stream_index, &args.pCodecContext);
   if(initialise_av < 0){
     logging("Initialising streamframes() falied.");
     return -1;
@@ -142,7 +145,7 @@ int main(int argc, const char *argv[]) {
   mg_log_set(MG_LL_DEBUG);  // Set log level
 
   args.mgr = &mgr;
-  mg_timer_add(&mgr, 3000, MG_TIMER_REPEAT, timer_fn, &args);  //add a timer to broadcast latest  frame
+  mg_timer_add(&mgr, 7000, MG_TIMER_REPEAT, timer_fn, &args);  //add a timer to broadcast latest  frame
   
 
   mg_http_listen(&mgr, s_listen_on, fn, NULL);  // Create HTTP listener

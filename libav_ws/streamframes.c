@@ -6,13 +6,11 @@
 #include <libavutil/pixdesc.h> //ffmpeg pixel format
 
 
-int streamframes(const char* inputName, char** initialised, AVFormatContext **pFormatContext, AVPacket **pPacket, int *video_stream_index, AVCodecContext **pCodecContext, AVFrame **pFrame )
+int streamframes(const char* inputName, char** initialised, AVFormatContext **pFormatContext, int *video_stream_index, AVCodecContext **pCodecContext)
 {
 
    
 if(strcmp(*initialised, "N") == 0) {
-
-    *initialised = "Y";
         
     logging("Initializing all the containers, codecs and protocols.");
 
@@ -77,6 +75,7 @@ if(strcmp(*initialised, "N") == 0) {
 	{
 		AVCodecParameters *pLocalCodecParameters = NULL;
 		pLocalCodecParameters = (*pFormatContext)->streams[i]->codecpar;
+
 		logging("AVStream->time_base before open coded %d/%d",
 			(*pFormatContext)->streams[i]->time_base.num,
 			(*pFormatContext)->streams[i]->time_base.den);
@@ -133,6 +132,8 @@ if(strcmp(*initialised, "N") == 0) {
 		return -1;
 	}
 
+	    
+
 	// https://ffmpeg.org/doxygen/trunk/structAVCodecContext.html
 	*pCodecContext = avcodec_alloc_context3(pCodec);
 	if (!*pCodecContext)
@@ -149,6 +150,20 @@ if(strcmp(*initialised, "N") == 0) {
 		return -1;
 	}
 
+
+
+// Set the frame rate of stream 0 to 30 frames per second
+// AVStream* stream = (*pFormatContext)->streams[*video_stream_index];
+// stream->avg_frame_rate.num = 1; // Numerator (frames per second)
+// stream->avg_frame_rate.den = 1;  // Denominator (seconds)
+
+// Set the desired max_delay value in microseconds  (this  is the jitter-buffer)
+int64_t maxDelay = 0; //3000000 = 3secs
+// Set the max_delay value in AVFormatContext
+(*pFormatContext)->max_delay = maxDelay;
+
+
+
 	// Initialize the AVCodecContext to use the given AVCodec.
 	// https://ffmpeg.org/doxygen/trunk/group__lavc__core.html#ga11f785a188d7d9df71621001465b0f1d
 	if (avcodec_open2(*pCodecContext, pCodec, NULL) < 0)
@@ -157,80 +172,136 @@ if(strcmp(*initialised, "N") == 0) {
 		return -1;
 	}
 
-	// https://ffmpeg.org/doxygen/trunk/structAVFrame.html
-	*pFrame = av_frame_alloc();
-	if (!*pFrame)
-	{
-		logging("failed to allocate memory for AVFrame");
-		return -1;
-	}
-	// https://ffmpeg.org/doxygen/trunk/structAVPacket.html
-	*pPacket = av_packet_alloc();
-	if (!*pPacket)
-	{
-		logging("failed to allocate memory for AVPacket");
-		return -1;
-	}
+	
 
 
-    //get_frames(pFormatContext, pPacket, *video_stream_index, pCodecContext, pFrame);
+   *initialised = "Y";
+
 } else {
 	logging("Already initialised: %s ", *initialised);
 	return -1;
 }
-
 
     return 0;
 
     }
 
 
-int get_frames(AVFormatContext *pFormatContext, AVPacket *pPacket, int video_stream_index, AVCodecContext *pCodecContext, AVFrame *pFrame, unsigned char** imageDataBuffer, size_t *imageDataSize)
+int get_frames(AVFormatContext *pFormatContext, int video_stream_index, AVCodecContext *pCodecContext, unsigned char** imageDataBuffer, size_t *imageDataSize)
 {
 	
-    // logging("Image size now: %d", *imageDataSize);
-    // *imageDataSize = pCodecContext->frame_number;
+// https://ffmpeg.org/doxygen/trunk/structAVFrame.html
+	AVFrame *pFrame = av_frame_alloc();
+	if (!pFrame)
+	{
+		logging("failed to allocate memory for AVFrame");
+		return -1;
+	}
+	// https://ffmpeg.org/doxygen/trunk/structAVPacket.html
+	AVPacket *pPacket = av_packet_alloc();
+	if (!pPacket)
+	{
+		logging("failed to allocate memory for AVPacket");
+		return -1;
+	}
 
-	// fill the Packet with data from the Stream
-	// https://ffmpeg.org/doxygen/trunk/group__lavf__decoding.html#ga4fdb3084415a82e3810de6ee60e46a61
-	
-		// Receive the latest frame
-		int receive_response = av_read_frame(pFormatContext, pPacket);
+
+AVStream* stream = pFormatContext->streams[video_stream_index]; 
+AVRational frame_rate = stream->avg_frame_rate; 
+logging("Incoming Frame rate: %d/%d Searching for I frames: \n", frame_rate.num, frame_rate.den);
+
+
+//int64_t latestTimestamp = 0;
+int retry = 0;
+int atLeastOneVideo = -1;
+int receive_response = 0;
+while ( receive_response >= 0 ) {
+
+		printf(".");
+
+		//av_seek_frame(pFormatContext, -1, desiredTimestamp, AVSEEK_FLAG_BACKWARD);
+		receive_response = av_read_frame(pFormatContext, pPacket);
 
 		if (receive_response == AVERROR(EAGAIN))
 		{
-			logging("No frame available, continue reading next packet");
-			return -1;
+			logging("No frames available"); 
+			if (atLeastOneVideo == 0) {
+			break;
+			} else if (retry > 3 )  {
+				logging("max retries reached");
+				return -1;
+			} else {
+				retry += 1;
+				continue;
+			}
 		}
 		else if (receive_response < 0)
 		{
-			logging("Error reading frame");
+			logging("Error reading frame"); //could reinitialise connection to rtsp stream here
+
+			if (atLeastOneVideo == 0) {
+			break;
+			} else {
 			return -1;
+			}
 		}
 
 
 		// if it's the video stream
 		if (pPacket->stream_index == video_stream_index)
 		{
-            logging("AVPacket->pts %" PRId64, pPacket->pts);
 
-			int decode_response = decode_packet(pPacket, pCodecContext, pFrame, imageDataBuffer, imageDataSize);
+        //logging("Got video AVPacket->pts %" PRId64, pPacket->pts);
+		
+			if (pPacket->data[0] == 0x00 && pPacket->data[1] == 0x00 && pPacket->data[2] == 0x00 && pPacket->data[3] == 0x01) {
+    			// NALU start code prefix (0x000001) is present
+
+			    int nalType = pPacket->data[4] & 0x1F; // Extract the NALU type from the first byte
+				if (nalType == 7) {
+        		// NALU type 7 indicates an I-frame or IDR frame
+				//logging("GOT IFRAME!");
+				
+		       	atLeastOneVideo = 0;
+				break;
+				}
+			}
+
+		av_packet_unref(pPacket);
+		continue;
+
+		} else  {
+			 logging("NON VIDEO PACKET RECEIVED");
+			 av_packet_unref(pPacket);
+			 continue;
+		}
+}
+
+
+int decode_response = decode_packet(pPacket, pCodecContext, pFrame, imageDataBuffer, imageDataSize);
 			if (decode_response < 0) {
 				logging("Error decode_packet");
 			    return -1;
 			}
-		}
+
+
 
 	// https://ffmpeg.org/doxygen/trunk/group__lavc__packet.html#ga63d5a489b419bd5d45cfd09091cbcbc2
 	av_packet_unref(pPacket);	//can now realocate
+	av_frame_unref(pFrame);
 
-	// avformat_close_input(&pFormatContext); //closes rtsp
-	// av_packet_free(&pPacket); //can not reuse anymore
-	// av_frame_free(&pFrame); //can not reuse anymore
+	av_packet_free(&pPacket); //can not reuse anymore
+	pPacket = NULL;
+	av_frame_free(&pFrame); //can not reuse anymore
+	pFrame = NULL;
+	// avformat_close_input(&pFormatContext); //closes rtsp 
 	// avcodec_free_context(&pCodecContext); //can not reuse anymore
+
+	
 
 	return 0;
 }
+
+    
 
 
 int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame, unsigned char** imageDataBuffer, size_t *imageDataSize)
@@ -239,49 +310,46 @@ int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFr
 
 	// Supply raw packet data as input to a decoder
 	// https://ffmpeg.org/doxygen/trunk/group__lavc__decoding.html#ga58bc4bf1e0ac59e27362597e467efff3
-	int response = avcodec_send_packet(pCodecContext, pPacket);
+	int sendPacketToDecoder = avcodec_send_packet(pCodecContext, pPacket); //--------------------------------IMPORTANT------
 
-	if (response < 0)
+	if (sendPacketToDecoder < 0)
 	{
 		logging(
-			"Error while sending a packet to the decoder: %s", av_err2str(response));
-		return response;
+			"Error while sending a packet to the decoder: %s", av_err2str(sendPacketToDecoder));
+		return sendPacketToDecoder;
 	}
 
-	while (response >= 0)
-	{
+    int giveMeDecodedFrame = 0;
+	while (giveMeDecodedFrame >= 0)
+  	{
+	
 		// Return decoded output data (into a frame) from a decoder
 		// https://ffmpeg.org/doxygen/trunk/group__lavc__decoding.html#ga11e6542c4e66d3028668788a1a74217c
-		response = avcodec_receive_frame(pCodecContext, pFrame);
-		if (response == AVERROR(EAGAIN) || response == AVERROR_EOF)
-		{
-			break;
-		}
-		else if (response < 0)
-		{
-			logging("Error while receiving a frame from the decoder: %s",
-				av_err2str(response));
-			return response;
-		}
 
-		if (response >= 0)
-		{
+		giveMeDecodedFrame = avcodec_receive_frame(pCodecContext, pFrame); //--------------------------------IMPORTANT------
+		if (giveMeDecodedFrame == AVERROR(EAGAIN) || giveMeDecodedFrame == AVERROR_EOF) {
+      	break;
+    	} else if (giveMeDecodedFrame < 0) {
+      	logging("Error while receiving a frame from the decoder: %s", av_err2str(giveMeDecodedFrame));
+      	return giveMeDecodedFrame;
+    	}
+		
+		
+		if (giveMeDecodedFrame >= 0) {
+
 			logging("Decoded Frame %d (type=%c, size=%d bytes, format=%d) pts %d key_frame "
-					"%d [DTS %d]",
+					"%d [DTS %d] ",
 				pCodecContext->frame_number,
 				av_get_picture_type_char(pFrame->pict_type), pFrame->pkt_size,
 				pFrame->format, pFrame->pts, pFrame->key_frame,
 				pFrame->coded_picture_number);
 			
-			const AVPixFmtDescriptor *pixDesc = av_pix_fmt_desc_get(pFrame->format);
-    		 if (!pixDesc) {
-      		  printf("Failed to get pixel format descriptor\n");
-
-   			 }
+			// const AVPixFmtDescriptor *pixDesc = av_pix_fmt_desc_get(pFrame->format);
+    		//  if (!pixDesc) {
+      		//   printf("Failed to get pixel format descriptor\n");
+   			//  }
+            // printf("Pixel format: %s\n", pixDesc->name);
 			
-            printf("Pixel format: %s\n", pixDesc->name);
-			//printf("Colorspace format: %s\n", pFrame->colorspace);
-
 
 			
 			//JPEG FILE NAME
@@ -304,17 +372,24 @@ int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFr
 
    			 int convertandsend = save_frame_as_jpeg(pFrame, frame_filename, imageDataBuffer, imageDataSize);
 			 if (convertandsend < 0) { logging("Error saving jpeg"); }
-
-		
-		}
+			}
 	}
+	
+	//avcodec_flush_buffers(pCodecContext);  //Added to try to get rid of old data
+
+	//added as experiment
+	av_packet_unref(pPacket);	//can now realocate
+	av_frame_unref(pFrame);
+	
+
+
 	return 0;
 }
 
-int save_frame_as_jpeg(AVFrame *pFrame, char* frame_filename, unsigned char** imageDataBuffer, size_t *imageDataSize) {
+int save_frame_as_jpeg(AVFrame *pFrame, char* frame_filename, unsigned char** imageDataBuffer, size_t *imageDataSize) 
+{
 
-logging("Incoming: %d", *imageDataSize);
-//*imageDataSize = pCodecContext->frame_number;
+logging("Incoming image size: %d", *imageDataSize);
 
 AVCodec *jpegCodec = avcodec_find_encoder(AV_CODEC_ID_MJPEG);
     if (!jpegCodec) {
@@ -335,13 +410,29 @@ AVRational time_base;
 time_base.num = 1;
 time_base.den = 90000;
 jpegCodecCtx->time_base = time_base;
-// Set the pts (presentation timestamp) value of the frame to 1000 (1 second)
-// int64_t pts = 1000;
-// jpegCodecCtx->pts = pts;
+
+
+jpegCodecCtx->bit_rate = 400000; // Adjust the bit rate as needed
+
+// int width = 1280;
+// int height = 720;
+// pFrame->width = width;
+// pFrame->height = height;
+// pFrame->format = AV_PIX_FMT_YUV420P;
+// jpegCodecCtx->width = width;
+// jpegCodecCtx->height = height;
+
 jpegCodecCtx->width = pFrame->width;
 jpegCodecCtx->height = pFrame->height;
 jpegCodecCtx->pix_fmt = AV_PIX_FMT_YUVJ420P; // Use the JPEG-specific pixel format
 jpegCodecCtx->color_range = AVCOL_RANGE_JPEG; // Set the color range to JPEG
+
+//experiment
+// AVRational frameRate;
+// frameRate.num = 1;  // Numerator of the frame rate
+// frameRate.den = 1;   // Denominator of the frame rate
+// jpegCodecCtx->framerate = frameRate;
+
 
     // Open the JPEG encoder
     if (avcodec_open2(jpegCodecCtx, jpegCodec, NULL) < 0) {
@@ -351,75 +442,41 @@ jpegCodecCtx->color_range = AVCOL_RANGE_JPEG; // Set the color range to JPEG
     }
 
     // Allocate an AVPacket for the encoded JPEG data
-    AVPacket packet;
-    av_init_packet(&packet);
-    packet.data = NULL;
-    packet.size = 0;
+    AVPacket encodedJPEGPacket;
+    av_init_packet(&encodedJPEGPacket);
+    encodedJPEGPacket.data = NULL;
+    encodedJPEGPacket.size = 0;
+
+	avcodec_flush_buffers(jpegCodecCtx);  //Added to try to get rid of old data
 
     // Encode the frame
-    avcodec_send_frame(jpegCodecCtx, pFrame);
-    avcodec_receive_packet(jpegCodecCtx, &packet);
+    avcodec_send_frame(jpegCodecCtx, pFrame);  //I DON THINK PFRAME IS BEING UPDATED AS IT SHOULD BE
+    avcodec_receive_packet(jpegCodecCtx, &encodedJPEGPacket);
 
-    //-------Save the packet data to a file
-    // FILE *f = fopen(frame_filename, "wb");
-    // if (!f) {
-    //     fprintf(stderr, "Failed to open output file '%s'\n", frame_filename);
-    //     av_packet_unref(&packet);
-    //     avcodec_free_context(&jpegCodecCtx);
-    //     return -1;
-    // }
-    // fwrite(packet.data, 1, packet.size, f);
-    // fclose(f);
-
-
-//----------Save to buffer instead of file
-// const char buffer = NULL;
-// int buffer_size = packet.size;
-
-//     // Open a temporary file in memory for writing
-//     FILE* mem_file = fmemopen((void*)buffer, buffer_size, "w");
-//     if (!mem_file) {
-//         printf("Failed to open memory file\n");
-//         return 1;
-//     }
-
-//     fwrite(packet.data, 1, packet.size, mem_file);
-//     fclose(mem_file);
-
-//     // Output the updated buffer
-
-
-// packet.size;
-// ws_sendframe_bin(NULL, &buffer, new_size);
-
-// free(&buffer);
-
-
-// Assume packet is of type AVPacket
-// Assume imageDataBuffer is of type unsigned char**
-// Assume imageDataSize is of type size_t*
 
 // Allocate memory for the buffer based on packet size
-*imageDataBuffer = (unsigned char*) av_malloc(packet.size);
+*imageDataBuffer = (unsigned char*) av_malloc(encodedJPEGPacket.size);
 if (*imageDataBuffer == NULL) {
+	logging("Could not allocate memory for the buffer based on encodedJPEGPacket size");
    return -1;
 }
 
-// Copy packet data to the buffer
-memcpy(*imageDataBuffer, packet.data, packet.size);
+// Copy encodedJPEGPacket data to the buffer
+memcpy(*imageDataBuffer, encodedJPEGPacket.data, encodedJPEGPacket.size);
 
 // Update the image data size
-*imageDataSize = packet.size;
-
-
-
+*imageDataSize = encodedJPEGPacket.size;
 
 
 // Clean up
 	
-    av_packet_unref(&packet);
+	av_frame_unref(pFrame);
+
+    av_packet_unref(&encodedJPEGPacket);
+    //av_packet_free(&encodedJPEGPacket);
+	
     avcodec_free_context(&jpegCodecCtx);
 
-    printf("JPEG image saved as '%s'\n", frame_filename);
+    printf("\nFRAME NUMBER: '%s'\n", frame_filename);
 	return 0;
 }

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <body>
-    <h1>Websocket test client</h1>
+    <h1>Websocket main client</h1>
     <input id="url" type="text" placeholder="Type URL" value="ws://localhost:8000/websocket" style="width:20em;" /> 
     <button id="connect">connect</button>
     <div style="height: 0.3em;">&nbsp;</div>
@@ -20,28 +20,7 @@
       ws = new WebSocket(url.value);
       if (!ws) return;
       ws.onopen = function() { log.innerHTML += 'CONNECTION OPENED<br/>'; }
-      ws.onmessage = function(ev) { 
-       // log.innerHTML += 'RECEIVED: ' + ev.data + '<br/>'; 
-    
-          // Create a URL for the Blob object
-          var blob = new Blob([event.data], { type: "image/jpeg" });
-					var imageUrl = URL.createObjectURL(blob);
-					
-					// Create an img element, set its src attribute, and append it to the DOM
-					var img = document.createElement("img");
-					img.width = 1280;
-					img.height = 720;
-					img.src = imageUrl;
-					document.body.appendChild(img);
-    
-
-
-
-
-
-
-    
-    }
+      ws.onmessage = function(ev) { log.innerHTML += 'RECEIVED: ' + ev.data + '<br/>'; }
       ws.onerror = function(ev) { log.innerHTML += 'ERROR: ' + ev + '<br/>'; }
       ws.onclose = function() { log.innerHTML += 'CONNECTION CLOSED<br/>'; enable(false); ws = null; }
       enable(true);
