@@ -412,15 +412,18 @@ time_base.den = 90000;
 jpegCodecCtx->time_base = time_base;
 
 
-jpegCodecCtx->bit_rate = 400000; // Adjust the bit rate as needed
+jpegCodecCtx->bit_rate = 200000; // Adjust the bit rate as needed (was 400000)
 
 // int width = 1280;
 // int height = 720;
 // pFrame->width = width;
 // pFrame->height = height;
 // pFrame->format = AV_PIX_FMT_YUV420P;
-// jpegCodecCtx->width = width;
-// jpegCodecCtx->height = height;
+// jpegCodecCtx->width = 640; //setting absolute value cuts the sides off
+// jpegCodecCtx->height = 360;
+// jpegCodecCtx->qmin = 100;
+// jpegCodecCtx->qmax = 100;
+jpegCodecCtx->qcompress = 0.3; // this actually makes a good difference to size without  killing quality
 
 jpegCodecCtx->width = pFrame->width;
 jpegCodecCtx->height = pFrame->height;

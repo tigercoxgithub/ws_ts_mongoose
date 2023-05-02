@@ -27,6 +27,8 @@
     var canvas = document.getElementById('video-canvas');
     var ctx = canvas.getContext('2d');
     var imageSources = [];
+    var img = new Image();
+    var counter = 0;
 
     ws.onmessage = function (ev) {
       // log.innerHTML += 'RECEIVED: ' + ev.data + '<br/>'; 
@@ -34,15 +36,21 @@
       // Create a URL for the Blob object
       
       imageSources.push(URL.createObjectURL(new Blob([event.data], { type: "image/jpeg" })));
-      const img = new Image();
+     // const img = new Image();
       img.src = imageSources[imageSources.length-1];
       console.log(imageSources);
       img.decode().then(() => {
         // Set the canvas dimensions to match the image dimensions
-        canvas.width = 1280;
-        canvas.height = 720;
+        canvas.width = img.width;
+        canvas.height = img.height;
         // Draw the image onto the canvas
         ctx.drawImage(img, 0, 0);
+
+        ctx.font = "24px Arial";
+        ctx.fillStyle = "white";
+        ctx.textAlign = "right";
+        ctx.fillText("Counter: " + counter, canvas.width - 10, 30);
+        counter++;
 
         if(imageSources.length>2){
           URL.revokeObjectURL(imageSources[0]); // manually revoke the URL to release its memory
