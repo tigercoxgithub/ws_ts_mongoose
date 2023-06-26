@@ -6,11 +6,12 @@
 #include <libavutil/pixdesc.h> //ffmpeg pixel format
 
 
-int streamframes(const char* inputName, char** initialised, AVFormatContext **pFormatContext, int *video_stream_index, AVCodecContext **pCodecContext)
+int streamframes(const char* inputName, int* initialised, AVFormatContext **pFormatContext, int *video_stream_index, AVCodecContext **pCodecContext)
 {
 
+ logging("Streamframes called: %d , %s , %d", *initialised, inputName, *video_stream_index);
    
-if(strcmp(*initialised, "N") == 0) {
+if(*initialised < 0) {
         
     logging("Initializing all the containers, codecs and protocols.");
 
@@ -48,8 +49,8 @@ if(strcmp(*initialised, "N") == 0) {
 
 	logging("finding stream info from format");
 	// read Packets from the Format to get stream information
-	// this function populates pFormatContext->streams
-	// (of size equals to pFormatContext->nb_streams)
+	// this function populates *pFormatContext->streams
+	// (of size equals to *pFormatContext->nb_streams)
 	// the arguments are:
 	// the AVFormatContext
 	// and options contains options for codec corresponding to i-th stream.
@@ -175,10 +176,10 @@ int64_t maxDelay = 0; //3000000 = 3secs
 	
 
 
-   *initialised = "Y";
+   *initialised = 1;
 
 } else {
-	logging("Already initialised: %s ", *initialised);
+	logging("Already initialised: %d ", *initialised);
 	return -1;
 }
 
@@ -187,8 +188,10 @@ int64_t maxDelay = 0; //3000000 = 3secs
     }
 
 
-int get_frames(AVFormatContext *pFormatContext, int video_stream_index, AVCodecContext *pCodecContext, unsigned char** imageDataBuffer, size_t *imageDataSize)
+int get_frames(AVFormatContext **pFormatContext, int *video_stream_index, AVCodecContext **pCodecContext, unsigned char* imageDataBuffer, size_t *imageDataSize)
 {
+
+	logging("getframes  called: %d ", *video_stream_index);
 	
 // https://ffmpeg.org/doxygen/trunk/structAVFrame.html
 	AVFrame *pFrame = av_frame_alloc();
@@ -205,8 +208,13 @@ int get_frames(AVFormatContext *pFormatContext, int video_stream_index, AVCodecC
 		return -1;
 	}
 
+if(pCodecContext == NULL){
+logging("getframes pCodecContext is null");
+};
+logging("getframes  next2 : %d ", *video_stream_index);
+AVStream* stream = (*pFormatContext)->streams[*video_stream_index]; //pFormatContext causing segmentation fault!!!
 
-AVStream* stream = pFormatContext->streams[video_stream_index]; 
+logging("getframes  next3 : %d ", *video_stream_index);
 AVRational frame_rate = stream->avg_frame_rate; 
 logging("Incoming Frame rate: %d/%d Searching for I frames: \n", frame_rate.num, frame_rate.den);
 
@@ -220,7 +228,7 @@ while ( receive_response >= 0 ) {
 		printf(".");
 
 		//av_seek_frame(pFormatContext, -1, desiredTimestamp, AVSEEK_FLAG_BACKWARD);
-		receive_response = av_read_frame(pFormatContext, pPacket);
+		receive_response = av_read_frame(*pFormatContext, pPacket);
 
 		if (receive_response == AVERROR(EAGAIN))
 		{
@@ -248,7 +256,7 @@ while ( receive_response >= 0 ) {
 
 
 		// if it's the video stream
-		if (pPacket->stream_index == video_stream_index)
+		if (pPacket->stream_index == *video_stream_index)
 		{
 
         //logging("Got video AVPacket->pts %" PRId64, pPacket->pts);
@@ -304,13 +312,13 @@ int decode_response = decode_packet(pPacket, pCodecContext, pFrame, imageDataBuf
     
 
 
-int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame, unsigned char** imageDataBuffer, size_t *imageDataSize)
+int decode_packet(AVPacket *pPacket, AVCodecContext **pCodecContext, AVFrame *pFrame, unsigned char* imageDataBuffer, size_t *imageDataSize)
 {
 
 
 	// Supply raw packet data as input to a decoder
 	// https://ffmpeg.org/doxygen/trunk/group__lavc__decoding.html#ga58bc4bf1e0ac59e27362597e467efff3
-	int sendPacketToDecoder = avcodec_send_packet(pCodecContext, pPacket); //--------------------------------IMPORTANT------
+	int sendPacketToDecoder = avcodec_send_packet(*pCodecContext, pPacket); //--------------------------------IMPORTANT------
 
 	if (sendPacketToDecoder < 0)
 	{
@@ -326,7 +334,7 @@ int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFr
 		// Return decoded output data (into a frame) from a decoder
 		// https://ffmpeg.org/doxygen/trunk/group__lavc__decoding.html#ga11e6542c4e66d3028668788a1a74217c
 
-		giveMeDecodedFrame = avcodec_receive_frame(pCodecContext, pFrame); //--------------------------------IMPORTANT------
+		giveMeDecodedFrame = avcodec_receive_frame(*pCodecContext, pFrame); //--------------------------------IMPORTANT------
 		if (giveMeDecodedFrame == AVERROR(EAGAIN) || giveMeDecodedFrame == AVERROR_EOF) {
       	break;
     	} else if (giveMeDecodedFrame < 0) {
@@ -339,7 +347,7 @@ int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFr
 
 			logging("Decoded Frame %d (type=%c, size=%d bytes, format=%d) pts %d key_frame "
 					"%d [DTS %d] ",
-				pCodecContext->frame_number,
+				(*pCodecContext)->frame_number,
 				av_get_picture_type_char(pFrame->pict_type), pFrame->pkt_size,
 				pFrame->format, pFrame->pts, pFrame->key_frame,
 				pFrame->coded_picture_number);
@@ -355,7 +363,7 @@ int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFr
 			//JPEG FILE NAME
 			char frame_filename[1024];
 			snprintf(frame_filename, sizeof(frame_filename), "%s-%d.jpg", "frame",
-			pCodecContext->frame_number);
+			(*pCodecContext)->frame_number);
 
 			// Check if the frame is a planar YUV 4:2:0, 12bpp
 			// That is the format of the provided .mp4 file
@@ -386,7 +394,7 @@ int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFr
 	return 0;
 }
 
-int save_frame_as_jpeg(AVFrame *pFrame, char* frame_filename, unsigned char** imageDataBuffer, size_t *imageDataSize) 
+int save_frame_as_jpeg(AVFrame *pFrame, char* frame_filename, unsigned char* imageDataBuffer, size_t *imageDataSize) 
 {
 
 logging("Incoming image size: %d", *imageDataSize);
@@ -453,19 +461,19 @@ jpegCodecCtx->color_range = AVCOL_RANGE_JPEG; // Set the color range to JPEG
 	avcodec_flush_buffers(jpegCodecCtx);  //Added to try to get rid of old data
 
     // Encode the frame
-    avcodec_send_frame(jpegCodecCtx, pFrame);  //I DON THINK PFRAME IS BEING UPDATED AS IT SHOULD BE
+    avcodec_send_frame(jpegCodecCtx, pFrame);  
     avcodec_receive_packet(jpegCodecCtx, &encodedJPEGPacket);
 
 
 // Allocate memory for the buffer based on packet size
-*imageDataBuffer = (unsigned char*) av_malloc(encodedJPEGPacket.size);
-if (*imageDataBuffer == NULL) {
+imageDataBuffer = (unsigned char*) av_malloc(encodedJPEGPacket.size);
+if (imageDataBuffer == NULL) {
 	logging("Could not allocate memory for the buffer based on encodedJPEGPacket size");
    return -1;
 }
 
 // Copy encodedJPEGPacket data to the buffer
-memcpy(*imageDataBuffer, encodedJPEGPacket.data, encodedJPEGPacket.size);
+memcpy(imageDataBuffer, encodedJPEGPacket.data, encodedJPEGPacket.size);
 
 // Update the image data size
 *imageDataSize = encodedJPEGPacket.size;

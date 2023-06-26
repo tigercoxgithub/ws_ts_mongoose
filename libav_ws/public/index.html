@@ -1,34 +1,147 @@
 <!DOCTYPE html>
-<html lang="en">
-  <body>
-    <h1>Websocket main client</h1>
-    <input id="url" type="text" placeholder="Type URL" value="ws://localhost:8000/websocket" style="width:20em;" /> 
-    <button id="connect">connect</button>
-    <div style="height: 0.3em;">&nbsp;</div>
-    <input id="message" type="text" placeholder="Type message" style="width: 20em;" /> 
-    <button id="send">send message</button>
-    <div style="margin-top: 1em;">Event log:</div>
-    <div id="log" style="background: #eee; height: 10em; padding: 0.5em;"><div>
-  </body>
-  <script>
-    var ws, E = function(id) { return document.getElementById(id); };
-    var url = E('url'), connect = E('connect'), message = E('message'), send = E('send'), log = E('log');
-    var enable = function(en) { message.disabled = send.disabled = !en; url.disabled = en; connect.innerHTML = en ? 'disconnect' : 'connect'; };
-    enable(false)
-    connect.onclick = function() {
-      if (ws) { ws.close(); return; }
-      ws = new WebSocket(url.value);
-      if (!ws) return;
-      ws.onopen = function() { log.innerHTML += 'CONNECTION OPENED<br/>'; }
-      ws.onmessage = function(ev) { log.innerHTML += 'RECEIVED: ' + ev.data + '<br/>'; }
-      ws.onerror = function(ev) { log.innerHTML += 'ERROR: ' + ev + '<br/>'; }
-      ws.onclose = function() { log.innerHTML += 'CONNECTION CLOSED<br/>'; enable(false); ws = null; }
-      enable(true);
-    };
-    send.onclick = function() {
-      if (!ws) return;
-      log.innerHTML += 'SENT: ' + message.value + '<br/>';
-      ws.send(message.value);
-    }
-  </script>
+<html>
+
+<head>
+    <title>Simple</title>
+</head>
+
+<body>
+    <img id="myImg" width="640" height="360"></img>
+    <br />
+    <button id="play">Play</button>
+    <button id="pause">Pause</button>
+    <button id="close">Close</button>
+    <br />
+
+    <!--
+    <script src="//cdn.jsdelivr.net/npm/eruda" is:inline></script>
+    <script is:inline>
+        eruda.init();
+    </script>
+    -->
+
+    <script>
+
+        //TODO: I propose we fetch  the latest image from api/latest using a client side timer until they're switched to websocket or press pause
+        //TODO: we dont want to fetch the same image over and over so the timer would need to determine if frameNumbers are going up
+
+
+        // Create a new FileReader object
+        const reader = new FileReader();
+        // Set up the onload function to set the src attribute of the img element to the data URL
+        reader.onload = function (event) {
+            const img = document.getElementById('myImg');
+            img.src = event.target.result;
+            img.decode().then(() => {
+                console.log("Image decoded successfully");
+            }).catch((encodingError) => {
+                console.log("Error decoding image");
+            });
+
+        };
+
+        //set the placeholder to the latest image before websocket is even connected
+        let imageUrl = "https://controller_cf_do.tigercox.workers.dev/api/cameras/down/latest";
+        fetch(imageUrl).then(response => response.blob()).then(blob => { reader.readAsDataURL(blob) });
+
+        // create the websocket automatically, can 'close' later
+        let websocket = new WebSocket("wss://frp3b.rhino-puffin.ts.net/websocket"); 
+
+        // Get references to the buttons
+        const playButton = document.getElementById('play');
+        const pauseButton = document.getElementById('pause');
+        const closeButton = document.getElementById('close');
+
+        // Set initial button states
+        playButton.disabled = false;
+        pauseButton.disabled = true;
+        closeButton.disabled = true;
+        let playon = false;
+
+        function initWS(ws) {
+            // WebSocket event listeners
+            ws.onopen = function () {
+                console.log("websocket open");
+                //playButton.disabled = false;
+                closeButton.disabled = false;
+                pauseButton.disabled = !playon;
+            };
+
+            ws.onclose = function () {
+                console.log("websocket closed");
+                playButton.disabled = false;
+                pauseButton.disabled = !playon;
+                closeButton.disabled = true;
+            };
+
+            ws.onmessage = async function (event) {
+                var dataType = typeof event.data;
+
+                if (dataType === 'string') {
+                    console.log('Received a string:', event.data);
+                } else if (dataType === 'object') {
+                    if (event.data instanceof ArrayBuffer) {
+                        console.log('Received an ArrayBuffer');
+                    } else if (event.data instanceof Blob) {
+                        console.log('Received a Blob');
+                        // Assuming event.data contains the image blob
+                        let imageBlob = new Blob([event.data], { type: 'image/jpeg' });
+                        if (playon) { reader.readAsDataURL(imageBlob) };
+                    } else {
+                        console.log('Received an object');
+                    }
+                } else {
+                    console.log('Received data of unknown type');
+                }
+            }
+
+        }
+
+        //auto play 
+        initWS(websocket);
+
+        // Button event listeners
+        playButton.addEventListener('click', function () {
+            playButton.disabled = !playButton.disabled;
+
+            if (websocket.readyState === WebSocket.OPEN) {
+                // Perform the action to play
+                playon = true;
+                console.log('Playing...');
+                pauseButton.disabled = false;
+                
+            } else {
+                websocket = new WebSocket("wss://frp3b.rhino-puffin.ts.net/websocket");
+                initWS(websocket);
+                playon = true;
+            }
+        });
+
+        pauseButton.addEventListener('click', function () {
+            if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
+                // Perform the action to pause
+                playon = false;
+                console.log('Paused...');
+                pauseButton.disabled = true;
+                playButton.disabled = false;
+            }
+        });
+
+        closeButton.addEventListener('click', function () {
+            if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
+                // Perform the action to close the WebSocket
+                console.log('Closing...');
+                websocket.close();
+                playButton.disabled = false;
+                pauseButton.disabled = true;
+                closeButton.disabled = true;
+            }
+        });
+
+
+
+
+    </script>
+</body>
+
 </html>
