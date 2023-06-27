@@ -6,10 +6,21 @@
 #include <libavformat/avformat.h> //ffmpeg
 #include <libavutil/pixdesc.h> //ffmpeg pixel format
 
-int streamframes(const char *inputName, int *initialised, AVFormatContext **pFormatContext, int *video_stream_index, AVCodecContext **pCodecContext);
-int get_frames(AVFormatContext **pFormatContext, int *video_stream_index, AVCodecContext **pCodecContext, unsigned char *imageDataBuffer, size_t *imageDataSize);
-int decode_packet(AVPacket *pPacket, AVCodecContext **pCodecContext, AVFrame *pFrame, unsigned char* imageDataBuffer, size_t *imageDataSize);
-int save_frame_as_jpeg(AVFrame *pFrame, char* frame_filename,  unsigned char* imageDataBuffer, size_t *imageDataSize);
+struct videoArgs 
+{
+  struct mg_mgr *mgr;
+  const char *inputName;
+  int initialised;
+  struct AVFormatContext *pFormatContext;
+  int video_stream_index;
+  struct AVCodecContext *pCodecContext;
+  unsigned char* imageDataBuffer;
+  size_t imageDataSize;
+};
+int streamframes(struct videoArgs *ARGS);
+int get_frames(struct videoArgs *ARGS);
+int decode_packet(AVPacket *pPacket, AVFrame *pFrame, struct videoArgs *ARGS);
+int save_frame_as_jpeg(AVFrame *pFrame, char *frame_filename,  struct videoArgs *ARGS);
 
 
 

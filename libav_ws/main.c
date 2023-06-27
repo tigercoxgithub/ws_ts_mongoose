@@ -10,81 +10,73 @@
 #include "logging.h"
 #include "streamframes.h"
 
-// Define a custom data structure to hold extra arguments
-struct videoArgs 
-{
-  struct mg_mgr *mgr;
-  const char *rtspUrl;
-  int initialised;
-  struct AVFormatContext *pFormatContext;
-  int video_stream_index;
-  struct AVCodecContext *pCodecContext;
-  unsigned char* imageDataBuffer;
-  size_t imageDataSize;
-};
 
-static void timer_fn (void* con) {
-logging("timer_fn called");
-struct mg_connection *c = (struct mg_connection*)con;
-struct videoArgs *newArgs = c->fn_data;
-//struct videoArgs *newArgs = args;
+static int init_fn (struct videoArgs *newArgs) {
+logging("init_fn called");
 
-logging("timerfn init: %d", newArgs->initialised);
+logging("init_fn init: %d", newArgs->initialised);
+logging("init_fn 1 pCodecContext is %s", newArgs->pCodecContext);
 
-if(newArgs->pCodecContext == NULL){
-logging("timerfn 1 pCodecContext is null");
-};
 
   // initialise video grabbing if it isnt already
   if (newArgs->initialised < 0) {
     int initialise_av =
-        streamframes(newArgs->rtspUrl, &newArgs->initialised, &newArgs->pFormatContext,
-                     &newArgs->video_stream_index, &newArgs->pCodecContext);
+        streamframes(newArgs);
     if (initialise_av < 0) {
       logging("Initialising streamframes() falied.");
       newArgs->initialised = -1;
     }
   }  else { logging("***  Already initialised libAV "); };
 
-logging("timerfn 2 init now: %d", newArgs->initialised);
-  if(newArgs->pCodecContext == NULL){
-logging("timerfn 3 pCodecContext is null");
-};
+logging("init_fn 2 init now: %d", newArgs->initialised);
+logging("init_fn 3 pCodecContext is %d", newArgs->pCodecContext);
 
-  
+
+return 1;
 }
 
-static void broadcaster (struct videoArgs* args) {
+static void broadcaster (void* incoming) {
 logging("broadcaster called");
+struct videoArgs *newerArgs = incoming;
+logging("BEFORE this should be null or 0: %d", newerArgs->pCodecContext);
 
-get_frames(&newArgs->pFormatContext, &newArgs->video_stream_index, &newArgs->pCodecContext, newArgs->imageDataBuffer, &newArgs->imageDataSize);
+// logging("INSIDE BROADCASTER AVStream->time_base before open coded %d/%d",
+// 			newerArgs->pFormatContext->streams[0]->time_base.num,
+// 			newerArgs->pFormatContext->streams[0]->time_base.den);
 
-  logging("---- DECODED IMAGE SIZE: %d", newArgs->imageDataSize);
+if (newerArgs->initialised == 1) {
+get_frames(newerArgs);
 
-  if(newArgs->imageDataSize > 0) {
+  logging("---- DECODED IMAGE SIZE: %d", newerArgs->imageDataSize);
+  logging("AFTER this should be null or 0: %d", newerArgs->pCodecContext);
 
-    struct mg_mgr *mgr = (struct mg_mgr *) newArgs->mgr;
+  if(newerArgs->imageDataSize > 0) {
+
+    struct mg_mgr *mgr = (struct mg_mgr *) newerArgs->mgr;
 
     // Traverse over all websocket connections and broadcast binary data to  all connected websocket clients 
     
     for (struct mg_connection *c = mgr->conns; c != NULL; c = c->next) {
       if (c->is_websocket) {
       logging("about  to  send websocket");
-      mg_ws_send(c, newArgs->imageDataBuffer,
-      newArgs->imageDataSize, WEBSOCKET_OP_BINARY);
+      mg_ws_send(c, newerArgs->imageDataBuffer,
+      newerArgs->imageDataSize, WEBSOCKET_OP_BINARY);
       }
     }
 
-      av_free(newArgs->imageDataBuffer);
-      newArgs->imageDataBuffer = NULL; // Set the pointer to NULL to avoid dangling pointer 
-      newArgs->imageDataSize = 0;
+      av_free(newerArgs->imageDataBuffer);
+      newerArgs->imageDataBuffer = NULL; // Set the pointer to NULL to avoid dangling pointer 
+      newerArgs->imageDataSize = 0;
 
   }
+} else {
+  logging("Not broadcasting as not initialised");
+}
 }
 
 static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
    if (ev == MG_EV_OPEN) {
-    c->is_hexdumping = 1;
+    //c->is_hexdumping = 1;
   } else if (ev == MG_EV_HTTP_MSG) {
     struct mg_http_message *hm = (struct mg_http_message *) ev_data;
     if (mg_http_match_uri(hm, "/websocket")) {
@@ -107,22 +99,20 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
      
       struct videoArgs *incomingArgs = c->fn_data;
 
-      //logging("start called and init in arg is: %d", incomingArgs->initialised);
+      logging("start called and init in arg is: %d", incomingArgs->initialised);
 
-      int count = 0;
-      // Iterate over the timer list and count the timers
+      mg_http_reply(c, 200, "", "{\"init\": %d}\n", init_fn(incomingArgs));
+      
 
-      for (struct mg_timer *timer = c->mgr->timers; timer != NULL;
-           timer = timer->next) {
-        count++;
-      };
+    } else if (mg_http_match_uri(hm, "/api/stop")) {
+     
+      struct videoArgs *incomingArgs = c->fn_data;
+      incomingArgs->initialised = -1; //THIS ISNT ENOUGH WE NEED TO RESET A FEW THINGS
 
-      if(count < 1){
-      mg_timer_add(c->mgr, 7000, MG_TIMER_RUN_NOW, timer_fn, (void*)c);  // add a timer to init if not init and broadcast latest frame to all ws clients
-      mg_http_reply(c, 200, "", "{\"initiating libav\": refresh page for latest status}\n");
-      } else {
-      mg_http_reply(c, 200, "", "{\"init\": %d, \"timers\": %d}\n", incomingArgs->initialised, count);
-      }
+      logging("stop called and turned init to: %d", incomingArgs->initialised);
+
+      mg_http_reply(c, 200, "", "{\"init\": %d}\n", incomingArgs->initialised);
+      
 
     } else if (mg_http_match_uri(hm, "/")) {
 
@@ -207,11 +197,10 @@ int main(int argc, const char *argv[]) {
   }
   logging("Your argument: %s", argv[1]);
 
-  struct mg_mgr mgr;  // Event manager
+  struct mg_mgr mgr;
   mg_mgr_init(&mgr);  // Initialise event manager
   logging("Starting WS listener on %s/websocket\n", s_listen_on);
   mg_log_set(MG_LL_DEBUG);  // Set log level
-
   struct videoArgs args = {
       &mgr,
       "rtsp://192.168.1.43:554/user=admin_password=21nv6srw_channel=1_stream=0.sdp?real_stream",
@@ -221,6 +210,7 @@ int main(int argc, const char *argv[]) {
       NULL,
       NULL,
       0};
+  mg_timer_add(&mgr, 7000, MG_TIMER_REPEAT, broadcaster, &args);  // add a timer to broadcast latest frame to all ws clients if already init
 
   mg_http_listen(&mgr, s_listen_on, fn, &args);  // Create HTTP listener
   for (;;) mg_mgr_poll(&mgr, 500);               // Infinite event loop
